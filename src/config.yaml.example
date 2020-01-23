@@ -1,0 +1,90 @@
+data:
+    data_dir: "/tmp/dstc8-track4/"
+    save_dir: "/tmp/dstc8-track4/save/"
+    transfo_dir: "/tmp/dstc8-track4/transfo/bert-base-cased-finetuned/"
+    embed_path: "/tmp/dstc8-track4/save/glove.840B.300d.txt"
+    cased: True
+    schema:
+        layer: 11
+        pooling: "max"
+    train:
+        single_domain: True
+        multi_domain: True
+    valid:
+        single_domain: True
+        multi_domain: True
+    test:
+        single_domain: True
+        multi_domain: True
+    concat_name: True
+    vocab_size: 5000
+model: "trade"
+model_param:
+    dc_gate: True
+    rnn: "GRU"
+    emb:
+        share_embed: True
+        embed_path: "/tmp/dstc8-track4/save/embed.pkl"
+        # dim: 300
+        freeze: False
+    enc:
+        lyr: 1
+        dim: 300
+        bid: True
+        drp: 0.1
+    dec:
+        lyr: 1
+        dim: 300
+        drp: 0.1
+        attn: "add"
+        # attn: "mul"
+        force_copy: True
+    sch:
+        type: "rnn"
+        service: False
+        lyr: 1
+        dim: 50
+        bid: False
+        drp: 0.1
+        # type: "embed"
+        # service: False
+        # dim: 50
+    cls:
+        lyr: 1
+        dim: 300
+        drp: 0.1
+    gat:
+        lyr: 2
+        dim: 300
+        drp: 0.1
+    optim: "Adam"
+    optim_param:
+        lr: 0.001
+        betas: [0.9, 0.999]
+train:
+    exp: "test"
+    device: 0
+    full_slot: False
+    multi_value: False
+    max_context_len: 500
+    max_desc_len: 30
+    max_val_len: 10
+    epochs: 5
+    batch_size: 32
+    alpha: 0.4 # value output
+    beta: 0.4 # context gate
+    gamma: 0.1 # requested slots
+    delta: 0.1 # active intent
+    show_metric: True
+    debug: False
+test:
+    exp: "test"
+    device: 0
+    max_context_len: 500
+    max_desc_len: 30
+    max_val_len: 10
+    similarity: "cos"
+    # similarity: "l2"
+    batch_size: 32
+    debug: False
+random_seed: 7122

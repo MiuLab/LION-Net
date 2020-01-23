@@ -1,0 +1,273 @@
+import argparse
+import copy
+import ipdb
+import json
+import mmap
+import numpy as np
+import pickle
+import spacy
+import sys
+
+from box import Box
+from collections import defaultdict
+from functools import reduce
+from operator import add
+from pathlib import Path
+from tqdm import tqdm
+
+from pytorch_transformers import BertTokenizer
+
+nlp = spacy.load('en')
+spacy_tokenizer = spacy.lang.en.English().Defaults().create_tokenizer(nlp)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '-c', '--config', dest='config_path',
+        default='./config.yaml', type=Path,
+        help='the path of config file')
+    args = parser.parse_args()
+    return vars(args)
+
+
+def extract_default_values(slot2value, slot2idx, idx2service, tokenizer):
+    schema_values = {}
+    for service in idx2service:
+        schema_value = []
+        for slot, values in slot2value.items():
+            slot_idx = slot2idx[slot]
+            if slot[0] == service:
+                schema_value.append((slot_idx, [DONTCARE]))
+                if values is not None:
+                    for value in values:
+                        value_idxes = tokenizer.encode(value)
+                        schema_value.append((slot_idx, value_idxes))
+        schema_values[service] = schema_value
+    return schema_values
+
+
+def main(config_path):
+    config = Box.from_yaml(config_path.open())
+    data_dir = Path(config.data.data_dir)
+    save_dir = Path(config.data.save_dir)
+    transfo_dir = Path(config.data.transfo_dir)
+
+    slot_detect = config.data.user_slot
+
+    tokenizer = BertTokenizer.from_pretrained(
+        transfo_dir,
+        do_lower_case=(not config.data.cased))
+
+    global DONTCARE
+    DONTCARE = tokenizer.convert_tokens_to_ids(["[DONTCARE]"])[0]
+
+    train_schema_vocab = pickle.load(
+        open(save_dir / "train_schema_vocab.pkl", 'rb'))
+    valid_schema_vocab = pickle.load(
+        open(save_dir / "valid_schema_vocab.pkl", 'rb'))
+
+    # Currently we only use single-domain dialogues
+    train_files = [
+        data_dir / "train" / f"dialogues_{idx:0>3}.json"
+        for idx in range(1, 44)]
+    valid_files = [
+        data_dir / "valid" / f"dialogues_{idx:0>3}.json"
+        for idx in range(1, 8)]
+
+    service2idx, idx2service = train_schema_vocab[0]
+    intent2idx, idx2intent = train_schema_vocab[1]
+    slot2idx, idx2slot = train_schema_vocab[2]
+    act2idx, idx2act = train_schema_vocab[3]
+    slot2value = train_schema_vocab[-1]
+    schema_values = extract_default_values(
+        slot2value, slot2idx, idx2service, tokenizer)
+
+    service2slots = defaultdict(list)
+    service2noncat = defaultdict(list)
+    service2intents = defaultdict(list)
+    for service, slot in idx2slot:
+        service2slots[service].append(slot2idx[(service, slot)])
+        if slot2value[(service, slot)] is None:
+            service2noncat[service].append(slot2idx[(service, slot)])
+    for service, intent in idx2intent:
+        service2intents[service].append(intent2idx[(service, intent)])
+
+    train_dialogues = []
+    for f in train_files:
+        train_dialogues.extend(json.load(open(f)))
+
+    active_intent_dataset = []
+    slot_tagging_dataset = []
+    requested_slots_dataset = []
+    for dialog in tqdm(train_dialogues):
+        utterances = []
+        actions = []
+        states = []
+        system_slots = []
+        for turn in dialog['turns']:
+            utterances.append(tokenizer.encode(turn['utterance']))
+            if turn['speaker'] == "SYSTEM":
+                # one frame for single-domain
+                frame = turn['frames'][0]
+                actions_with_slot = []
+                actions_with_intent = []
+                actions_other = []
+                service_name = frame['service']
+                for action in frame['actions']:
+                    act = action['act']
+                    act_idx = act2idx[act]
+                    # action with slot
+                    if act in ['INFORM', 'REQUEST', 'CONFIRM', 'OFFER']:
+                        slot_name = action['slot']
+                        slot_idx = slot2idx[(service_name, slot_name)]
+                        actions_with_slot.append([act_idx, slot_idx])
+                    # action with intent
+                    elif act == "OFFER_INTENT":
+                        for intent_name in action['values']:
+                            intent_idx = intent2idx[
+                                (service_name, intent_name)]
+                            actions_with_intent.append([act_idx, intent_idx])
+                    # other actions
+                    else:
+                        actions_other.append(act_idx)
+                actions.append(
+                    [actions_with_slot, actions_with_intent, actions_other])
+                action_slots = []
+                for action in frame['actions']:
+                    act = action['act']
+                    if act in ['INFORM', 'CONFIRM', 'OFFER']:
+                        slot_name = action['slot']
+                        slot_idx = slot2idx[(service_name, slot_name)]
+                        for value in action['values']:
+                            if value == "dontcare":
+                                value_idxes = [DONTCARE]
+                            else:
+                                value_idxes = tokenizer.encode(value)
+                            action_slots.append((slot_idx, value_idxes))
+                system_slots.append(action_slots)
+            if turn['speaker'] == "USER":
+                # one frame for single-domain
+                frame = turn['frames'][0]
+                service_name = frame['service']
+                service_idx = service2idx[service_name]
+                state = {
+                    'requested_slots': [],
+                    'active_intent': None,
+                    'slot_values': []}
+                for slot_name in frame['state']['requested_slots']:
+                    slot_idx = slot2idx[(service_name, slot_name)]
+                    state['requested_slots'].append(slot_idx)
+                if frame['state']['active_intent'] == 'NONE':
+                    intent_idx = 0
+                else:
+                    intent_idx = intent2idx[
+                        (service_name, frame['state']['active_intent'])]
+                state['active_intent'] = intent_idx
+                for slot_name, values in frame['state']['slot_values'].items():
+                    slot_idx = slot2idx[(service_name, slot_name)]
+                    for value in values:
+                        if value == "dontcare":
+                            value_idxes = [DONTCARE]
+                        else:
+                            value_idxes = tokenizer.encode(value)
+                        state['slot_values'].append((slot_idx, value_idxes))
+                states.append(state)
+                example = {}
+                example['service'] = service_idx
+                example['utterance'] = utterances[-1]
+                example['context'] = utterances[:-1]
+                if len(actions) > 0:
+                    example['actions_with_slot'] = reduce(
+                        add, [action[0] for action in actions])
+                    example['actions_with_intent'] = reduce(
+                        add, [action[1] for action in actions])
+                    example['actions_other'] = reduce(
+                        add, [action[2] for action in actions])
+                else:
+                    example['actions_with_slot'] = []
+                    example['actions_with_intent'] = []
+                    example['actions_other'] = []
+                example['previous_state'] = {}
+                if len(states) > 0:
+                    previous_state = states[-1]
+                    example['previous_state']['active_intent'] = \
+                        previous_state['active_intent']
+                    example['previous_state']['requested_slots'] = \
+                        previous_state['requested_slots']
+                    example['previous_state']['slot_values'] = \
+                        list(previous_state['slot_values'])
+                else:
+                    example['previous_state']['active_intent'] = 0
+                    example['previous_state']['requested_slots'] = []
+                    example['previous_state']['slot_values'] = []
+                # requested slots
+                for intent in service2intents[service_name]:
+                    _example = copy.deepcopy(example)
+                    _example['intent'] = intent
+                    if intent == state['active_intent']:
+                        _example['label'] = 1
+                    else:
+                        _example['label'] = 0
+                    active_intent_dataset.append(_example)
+                for slot in service2slots[service_name]:
+                    _example = copy.deepcopy(example)
+                    _example['slot'] = slot
+                    if slot in state['requested_slots']:
+                        _example['label'] = 1
+                    else:
+                        _example['label'] = 0
+                    requested_slots_dataset.append(_example)
+                # slot tagging
+                candidate_slots = copy.copy(schema_values[service_name])
+                if len(system_slots) > 0:
+                    for pair in system_slots[-1]:
+                        if pair not in candidate_slots:
+                            candidate_slots.append(pair)
+                utter_slots = []
+                if slot_detect == "NLU":
+                    for slot in frame['slots']:
+                        slot_name = slot['slot']
+                        slot_idx = slot2idx[(service_name, slot_name)]
+                        start, end = slot['start'], slot['exclusive_end']
+                        value = turn['utterance'][start: end]
+                        if value == "dontcare":
+                            value_idxes = [DONTCARE]
+                        else:
+                            value_idxes = tokenizer.encode(value)
+                        utter_slots.append((slot_idx, value_idxes))
+                elif slot_detect == "bigram":
+                    utterance = [
+                        w.text for w in spacy_tokenizer(turn['utterance'])]
+                    for idx in range(len(utterance) - 2):
+                        value_idxes = tokenizer.encode(utterance[idx: idx + 2])
+                        for slot_idx in service2noncat[service_name]:
+                            utter_slots.append((slot_idx, value_idxes))
+                for pair in utter_slots:
+                    if pair not in candidate_slots:
+                        candidate_slots.append(pair)
+                for slot, value in candidate_slots:
+                    _example = copy.deepcopy(example)
+                    _example['slot'] = slot
+                    _example['value'] = value
+                    if (slot, value) in state['slot_values']:
+                        _example['label'] = 1
+                    else:
+                        _example['label'] = 0
+                    slot_tagging_dataset.append(_example)
+    pickle.dump(
+        active_intent_dataset,
+        open(save_dir / "train_active_intent.pkl", 'wb'))
+    pickle.dump(
+        requested_slots_dataset,
+        open(save_dir / "train_requested_slots.pkl", 'wb'))
+    pickle.dump(
+        slot_tagging_dataset,
+        open(save_dir / "train_slot_tagging.pkl", 'wb'))
+
+
+if __name__ == "__main__":
+    with ipdb.launch_ipdb_on_exception():
+        sys.breakpointhook = ipdb.set_trace
+        args = parse_args()
+        main(**args)
