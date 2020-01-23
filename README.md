@@ -17,6 +17,7 @@ The dataset we used is Schema-Guided Dialogue State Tracking Dataset provided by
 
 Download the dataset first and remember to download the GloVe word vectors.
 > https://nlp.stanford.edu/projects/glove/
+
 After downloading you need to put them into the directory you want.
 #### Create dataset
     python3 preprocess.py
