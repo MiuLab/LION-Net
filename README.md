@@ -20,7 +20,7 @@ Download the dataset first and remember to download the GloVe word vectors.
 After downloading you need to put them into the directory you want.
 #### Create dataset
     python3 preprocess.py
-		python3 extract_schema.py
+    python3 extract_schema.py
 
 ## Training
 First, you need to make a copy of config.yaml.example and change the name to config.yaml
@@ -30,9 +30,8 @@ Sample usage:
     python3 train.py
 
 ## Testing
-
 Sample usage:
 
-   python3 test.py
+    python3 test.py
 
 
