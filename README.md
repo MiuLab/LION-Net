@@ -10,7 +10,7 @@ Required python packages are listed in *requirements.txt*.
 
 ## Dataset
 
-The dataset we used is Schema-Guided Dialogue State Tracking provided by Google.
+The dataset we used is Schema-Guided Dialogue State Tracking Dataset provided by Google.
 > https://github.com/google-research-datasets/dstc8-schema-guided-dialogue
 
 ## Preprocess
