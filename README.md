@@ -1,4 +1,4 @@
-#LION-Net: LIghtweight ONtology-independent Networks for Schema-Guided Dialogue State Generation
+LION-Net: LIghtweight ONtology-independent Networks for Schema-Guided Dialogue State Generation
 ===
 This repo contains source code of our DSTC8-trackIV 2020 paper "*LION-Net: LIghtweight ONtology-independent Networks for Schema-Guided Dialogue State Generation*"
 
