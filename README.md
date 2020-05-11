@@ -4,6 +4,7 @@ This repo contains source code of our DSTC8-trackIV 2020 paper "*LION-Net: LIght
 >https://drive.google.com/file/d/1d0S_i0eLYUBpTgs_AoyU0L106iI5WB3w/view?usp=sharing
 
 Please use the following bibtex to cite this paper, thank you!
+
 @Article {LION-Net,
 author = "Kai-Ling Lo Ting-Wei Lu Tzu-teng Weng I-Hsuan Chen Yun-Nung Chen",
 title = "LION-Net: LIghtweight ONtology-independent Networks for Schema-Guided Dialogue State Generation",
